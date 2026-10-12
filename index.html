@@ -2,15 +2,17 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Servo Press QC</title>
 <style>
-:root{--page:#F6F3FC;--panel:#FFFFFF;--text:#1E1630;--muted:#5E5573;--ink:#3B2670;--edge:#CFC3EC;--lav:#E9E3F5;--focus:#7C5CD6;
+:root{--page:#F6F3FC;--panel:#FFFFFF;--text:#1E1630;--muted:#5E5573;--ink:#3B2670;--on-ink:#fff;--edge:#CFC3EC;--lav:#E9E3F5;--focus:#7C5CD6;
 --f:"Barlow",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;--fc:"Barlow Condensed","Barlow",system-ui,Arial,sans-serif}
-@media(prefers-color-scheme:dark){:root{--page:#15111D;--panel:#1E1829;--text:#EEE9F8;--muted:#B3A9C9;--ink:#CDBDF5;--edge:#3D3359;--lav:#2B2340;--focus:#B49CF0}}
+@media(prefers-color-scheme:dark){:root{--page:#15111D;--panel:#1E1829;--text:#EEE9F8;--muted:#B3A9C9;--ink:#CDBDF5;--on-ink:#15111D;--edge:#3D3359;--lav:#2B2340;--focus:#B49CF0}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--page);color:var(--text);font-family:var(--f);line-height:1.4}
-.top{display:flex;align-items:center;gap:14px;padding:10px 20px;background:#3B2670;color:#fff}
-.logo{background:#fff;border-radius:8px;padding:3px 8px;display:flex;align-items:center;height:42px}
-.logo img{height:36px;width:auto;display:block}
-.brand{font-family:var(--fc);font-weight:600;font-size:22px;letter-spacing:.2px;line-height:1.1}
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px;padding:12px 20px;background:var(--panel);border-bottom:3px solid var(--edge)}
+.logo{flex:none;display:flex}
+.logo img{height:64px;width:auto;display:block}
+@media(prefers-color-scheme:dark){.logo{background:#fff;border-radius:8px;padding:3px 8px}}
+.brand{font-family:var(--fc);font-weight:600;font-size:24px;color:var(--ink);line-height:1.1}
+.brand small{display:block;font-family:var(--f);font-weight:400;font-size:13px;color:var(--muted)}
 main{max-width:560px;margin:0 auto;padding:28px 16px 48px}
 h1{font-family:var(--fc);font-weight:600;font-size:28px;margin:0 0 4px;color:var(--ink)}
 p{margin:0 0 20px;color:var(--muted)}
@@ -18,10 +20,11 @@ a.card{display:flex;justify-content:space-between;align-items:center;padding:16p
 a.card span{color:var(--ink);font-size:24px}
 a.card:hover{background:var(--lav)}
 a.card:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
-@media(max-width:480px){.top{padding:8px 12px;gap:10px}.brand{font-size:19px}}
+@media(max-width:700px){.top{padding:10px 14px}.logo img{height:56px}.brand{flex:1 0 100%;font-size:21px}}
 </style></head>
 <body>
-<header class="top"><div class="logo"><img src="logo.png" alt="Unusual Machines"></div><div class="brand">Servo Press QC</div></header>
+<script src="gate.js"></script>
+<header class="top"><div class="logo"><img src="logo.png" alt="Unusual Machines"></div><div class="brand">Servo Press QC<small>Press setup and quality checks</small></div></header>
 <main>
 <h1>Press QC reports</h1>
 <p>Select a press to open its QC report.</p>
