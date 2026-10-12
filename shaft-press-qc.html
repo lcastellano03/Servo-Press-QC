@@ -240,6 +240,17 @@ table.press{border-collapse:collapse;min-width:min(100%,420px);font-size:17px}
   .record{border:0;padding:0}
 }
 </style>
+<style id="logo-fix">
+.top{align-items:center;padding:10px 20px}
+.top .logo{flex:none;height:68px;padding:4px 12px;border-radius:10px}
+.top .logo img{flex:none;height:60px;width:auto;max-width:none;display:block}
+.top .brand{min-width:0}
+@media(max-width:700px){
+  .top{padding:8px 12px}
+  .top .logo{height:54px;padding:3px 8px}
+  .top .logo img{height:48px}
+}
+</style>
 </head>
 <body>
 <header class="top">
