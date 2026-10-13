@@ -155,12 +155,6 @@ table.press{border-collapse:collapse;min-width:min(100%,420px);font-size:17px}
 .press th{text-align:left;font-weight:400;color:var(--muted);padding:9px 20px 9px 0;border-bottom:1px solid var(--edge)}
 .press td{padding:9px 0;border-bottom:1px solid var(--edge);font-variant-numeric:tabular-nums}
 .press b{font-family:var(--fc);font-size:24px;color:var(--ink)}
-.chart{width:100%;height:auto;background:var(--panel);border:1px solid var(--edge);border-radius:12px;margin-top:10px}
-.chart .win{fill:var(--go-bg)}
-.chart .lim{stroke:var(--edge-2);stroke-dasharray:5 4}
-.chart .fitl{stroke:var(--ink);stroke-width:2}
-.chart .pt{fill:#7C5CD6;opacity:.8}
-.chart .ax{fill:var(--muted);font-size:12px;font-family:var(--f)}
 
 .gate{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px;padding:16px 18px;border-radius:14px;border:2px solid var(--edge);background:var(--wait-bg);margin-top:8px}
 .gate .gl{display:flex;align-items:center;gap:16px;min-width:0;flex:1 1 260px}
@@ -319,10 +313,7 @@ var QC = (function () {
     widthReadings: 3,
     widthTol: 0.05,
     adhesive: false,
-    windowConfirmed: true,
-    processFallback: true,
     processSigma: 4,
-    expectedSlopeSign: -1,
     gaugeNominal: 26.000,
     gaugeTol: 0.003,
     ladderParts: 12,
@@ -331,10 +322,6 @@ var QC = (function () {
     level5Factor: 1.5,
     settleTol: 0.01,
     pressureRoundUp: 1,
-    qcFactor: 0.9,
-    sigmaP: 3,
-    wallErrLimit: 0.02,
-    wallCorrection: true,
     protectionFactor: 1.2,
     minLadderComplete: 10,
     lowerStopSteps: 2,
@@ -346,14 +333,7 @@ var QC = (function () {
     programStoppedExpect: "NG",
     runParts: 30,
     minRunParts: 30,
-    minFitPoints: 15,
-    guardFactor: 2,
-    minGuard: 0.02,
-    widthFactor: 6,
     cpkTarget: 1.33,
-    slopeMin: 0.8,
-    slopeMax: 1.2,
-    r2Min: 0.8,
     zeroDriftTol: 0.01,
     scrapChecks: 2,
     damageCheckParts: 5,
@@ -503,24 +483,17 @@ var QC = (function () {
     out.protection = lad.L ? cfg.protectionFactor * lad.L.top : null;
     var pprod = num(run.pprodOverride) ? run.pprodOverride : (num(lad.pprodRec) ? lad.pprodRec : null);
     out.pprod = pprod;
-    out.pqc = num(pprod) ? cfg.qcFactor * pprod : null;
+    out.pqc = num(pprod) ? pprod : null;
 
-    var w = run.wall || {};
-    if (num(out.pqc) && num(w.xqc) && num(w.xprod) && w.xprod !== w.xqc) {
-      out.wallSlope = (pprod - out.pqc) / (w.xprod - w.xqc);
-      out.wallErr = out.wallSlope !== 0 ? cfg.sigmaP / Math.abs(out.wallSlope) : null;
-      out.wallPass = num(out.wallErr) && out.wallErr <= cfg.wallErrLimit + EPS;
-    } else { out.wallSlope = null; out.wallErr = null; out.wallPass = null; }
 
     var ex = exportIndex(run);
     out.exportCount = (run.exportData && run.exportData.rows) ? run.exportData.rows.length : 0;
     function xAt(row) {
       if (!row || !num(row.xEnd)) return null;
-      if (cfg.wallCorrection && num(out.wallSlope) && num(out.pqc) && num(row.pEnd) && row.pEnd >= out.pqc && out.wallSlope !== 0) return row.xEnd - (row.pEnd - out.pqc) / out.wallSlope;
       return row.xEnd;
     }
 
-    var fitX = [], fitY = [], seatX = [], ladderMatched = 0;
+    var seatX = [], ladderMatched = 0;
     for (var l = 0; l < cfg.levels; l++) {
       for (var p = 0; p < cfg.ladderParts; p++) {
         var rd = run.ladder && run.ladder[l] ? run.ladder[l][p] : null;
@@ -528,7 +501,6 @@ var QC = (function () {
         if (row) ladderMatched++;
         if (row && l === cfg.levels - 1 && num(row.xEnd)) seatX.push(row.xEnd);
         var xx = xAt(row);
-        if (num(rd) && num(xx)) { fitX.push(xx); fitY.push(rd); }
       }
     }
     out.ladderMatched = ladderMatched;
@@ -553,7 +525,6 @@ var QC = (function () {
       var row = ex[ID.shortPart(i + 1)];
       var xx = xAt(row);
       shorts.push({ id: ID.shortPart(i + 1), y: num(y) ? y : null, x: xx, matched: !!row });
-      if (num(y) && num(xx)) { fitX.push(xx); fitY.push(y); }
     });
     out.shorts = shorts;
 
@@ -567,43 +538,22 @@ var QC = (function () {
     }
     out.run = { n: runX.length, matched: runMatched, ng: runNG, mean: runX.length >= 2 ? mean(runX) : null, sd: runX.length >= 3 ? sd(runX) : null };
 
-    var f = { n: fitX.length };
-    if (fitX.length >= 3) {
-      var mx = mean(fitX), my = mean(fitY), sxx = 0, sxy = 0, syy = 0;
-      for (var q = 0; q < fitX.length; q++) { sxx += (fitX[q] - mx) * (fitX[q] - mx); sxy += (fitX[q] - mx) * (fitY[q] - my); syy += (fitY[q] - my) * (fitY[q] - my); }
-      if (sxx > 0) {
-        f.b = sxy / sxx; f.a = my - f.b * mx;
-        var sse = 0;
-        for (var t = 0; t < fitX.length; t++) { var e = fitY[t] - (f.a + f.b * fitX[t]); sse += e * e; }
-        f.sres = fitX.length > 2 ? Math.sqrt(sse / (fitX.length - 2)) : null;
-        f.r2 = syy > 0 ? (sxy * sxy) / (sxx * syy) : null;
+    var lim = { sigma: cfg.processSigma, capped: false };
+    var shortPos = out.shorts.map(function (s) { return s.x; }).filter(num);
+    var short1 = shortPos.length ? Math.max.apply(null, shortPos) : (out.shortTargets ? Math.max.apply(null, out.shortTargets) : null);
+    if (num(out.run.mean) && num(out.run.sd)) {
+      lim.mode = "window";
+      lim.qcMin = out.run.mean - cfg.processSigma * out.run.sd;
+      lim.qcMax = out.run.mean + cfg.processSigma * out.run.sd;
+      if (num(short1) && short1 < out.run.mean) {
+        var floor = (out.run.mean + short1) / 2;
+        if (lim.qcMin < floor) { lim.qcMin = floor; lim.capped = true; }
       }
-    }
-    f.points = fitX.map(function (x, k) { return [x, fitY[k]]; });
-    out.fit = f;
-
-    var lim = {};
-    if (num(f.b) && f.b !== 0) {
-      var x1 = (out.ylo - f.a) / f.b, x2b = (out.yhi - f.a) / f.b;
-      lim.xMin = Math.min(x1, x2b); lim.xMax = Math.max(x1, x2b);
-    }
-    if (num(f.sres)) lim.guard = Math.max(cfg.guardFactor * f.sres, cfg.minGuard);
-    if (num(lim.xMin) && num(lim.guard)) { lim.qcMinRaw = lim.xMin + lim.guard; lim.qcMaxRaw = lim.xMax - lim.guard; lim.width = lim.qcMaxRaw - lim.qcMinRaw; }
-    lim.scatter = num(out.run.sd) ? out.run.sd : (num(f.sres) ? f.sres : null);
-    lim.scatterSource = num(out.run.sd) ? "run" : (num(f.sres) ? "fit" : null);
-    lim.widthPass = (num(lim.width) && num(lim.scatter)) ? lim.width >= cfg.widthFactor * lim.scatter - EPS : null;
-    lim.mode = lim.widthPass === true ? "physical" : (lim.widthPass === false ? "unusable" : "waiting");
-    lim.qcMin = lim.mode === "physical" ? lim.qcMinRaw : null;
-    lim.qcMax = lim.mode === "physical" ? lim.qcMaxRaw : null;
-    if (lim.mode === "unusable" && cfg.processFallback && num(out.run.mean) && num(out.run.sd)) {
-      lim.mode = "process"; lim.qcMin = out.run.mean - cfg.processSigma * out.run.sd; lim.qcMax = out.run.mean + cfg.processSigma * out.run.sd;
-    }
+    } else { lim.mode = "waiting"; lim.qcMin = null; lim.qcMax = null; }
+    lim.scatter = num(out.run.sd) ? out.run.sd : null;
     lim.checks = [
-      { key: "fitPoints", label: "Enough fit points (" + cfg.minFitPoints + " or more)", state: f.n >= cfg.minFitPoints ? "PASS" : "FAIL" },
-      { key: "slopeMag", label: "Slope close to 1 in size", state: num(f.b) ? ((Math.abs(f.b) >= cfg.slopeMin && Math.abs(f.b) <= cfg.slopeMax) ? "PASS" : "FAIL") : "WAIT" },
-      { key: "slopeSign", label: "Slope points the right way", state: num(f.b) ? ((f.b * cfg.expectedSlopeSign > 0) ? "PASS" : "FAIL") : "WAIT" },
-      { key: "r2", label: "Fit quality (R squared " + cfg.r2Min + " or more)", state: num(f.r2) ? (f.r2 >= cfg.r2Min ? "PASS" : "WARN") : "WAIT" },
-      { key: "width", label: lim.mode === "process" ? "Process window used (drawing window too narrow)" : "Window wide enough for the scatter", state: lim.widthPass === null ? "WAIT" : ((lim.widthPass || lim.mode === "process") ? "PASS" : "FAIL") }
+      { key: "runPoints", label: "Run has enough parts (" + cfg.minRunParts + " or more)", state: out.run.n >= cfg.minRunParts ? "PASS" : (out.run.n ? "FAIL" : "WAIT") },
+      { key: "shortOut", label: "Closest short part falls outside the window", state: (num(lim.qcMin) && num(short1)) ? (short1 < lim.qcMin ? "PASS" : "FAIL") : "WAIT" }
     ];
     out.limits = lim;
 
@@ -624,7 +574,7 @@ var QC = (function () {
     tests.push({ id: ID.test(si + 1), type: "Offset shim", value: cfg.shimThickness, result: sres || null, expected: sexp });
     tests.forEach(function (t) { t.check = (!t.expected || !t.result) ? null : ((t.expected === "either" || t.expected === t.result) ? "PASS" : "FAIL"); });
     v.tests = tests;
-    v.cpk = (lim.mode === "physical" && num(out.run.sd) && out.run.sd > 0 && num(out.run.mean)) ? Math.min(lim.qcMax - out.run.mean, out.run.mean - lim.qcMin) / (3 * out.run.sd) : null;
+    v.cpk = (lim.mode === "window" && num(out.run.sd) && out.run.sd > 0 && num(out.run.mean)) ? Math.min(lim.qcMax - out.run.mean, out.run.mean - lim.qcMin) / (3 * out.run.sd) : null;
     var nStopped = tests.filter(function (t) { return t.type === "Program-stopped" && t.result; }).length;
     var nShim = tests.filter(function (t) { return t.type === "Offset shim" && t.result; }).length;
     var gauge = cfg.gauge && cfg.gauge.passed;
@@ -634,16 +584,13 @@ var QC = (function () {
       ["Production pressure is at or above the recommendation", num(pprod) && num(lad.pprodRaw) && pprod >= lad.pprodRaw - EPS, "Use the recommended production pressure."],
       ["Confirm run has enough parts", out.confirm.enough, "Press and measure the full confirm run."],
       ["No confirm part moved at the top level", out.confirm.n > 0 && out.confirm.moved === 0, "Raise the production pressure one step and repeat with at least 10 fresh parts."],
-      ["Slope close to 1 in size", lim.checks[1].state === "PASS", "Look for fixture flex or a measurement problem."],
-      ["Slope points the right way", lim.checks[2].state === "PASS", "Check the counting direction on the gauge."],
-      ["A usable QC window exists", lim.mode === "physical" || lim.mode === "process", "Reduce scatter."],
-      ["Wall slope test passes", out.wallPass === true, "Move the QC pressure closer to the production pressure."],
+      ["A usable QC window exists", lim.mode === "window", "Reduce scatter."],
       ["At least " + (cfg.shortOffsets || []).length + " program-stopped tests", nStopped >= (cfg.shortOffsets || []).length, "Press the program-stopped test parts."],
       ["At least 1 offset shim test", nShim >= 1, "Press one part with the shim under the nest."],
       ["All challenge tests match what is expected", tests.some(function (t) { return t.check === "PASS"; }) && !tests.some(function (t) { return t.check === "FAIL"; }), "A bad part passed or a good part failed."],
       ["Run has enough parts", out.run.n >= cfg.minRunParts, "Press the full run of consecutive parts."],
       ["No NG on the press during the run", out.run.ng === 0, "Investigate each NG before release."],
-      lim.mode === "process" ? ["Cpk not used with a process window", true, ""] : ["Cpk at or above " + cfg.cpkTarget, num(v.cpk) && v.cpk >= cfg.cpkTarget, "Reduce scatter or check the measurement."]
+      ["Cpk at or above " + cfg.cpkTarget, num(v.cpk) && v.cpk >= cfg.cpkTarget, "Reduce scatter or check the measurement."]
     ];
     if (cfg.requireGaugeSignoff) items.push(["Gauge check passed", !!gauge, "The gauge check has to be signed off in Settings."]);
     v.checklist = items.map(function (x) { return { label: x[0], pass: !!x[1], fix: x[2] }; });
@@ -686,7 +633,7 @@ if (typeof module !== "undefined") module.exports = QC;
       app: "bearing-press-qc", press: "Bearing", schema: 1, name: "", size: c.defaultSize, status: "in progress", step: 0, reached: 0,
       createdAt: Date.now(), updatedAt: Date.now(), createdBy: S.me || null,
       cfg: c, done: {}, P0: null, damage: null, gaugeBlock: null, scrap: [], ladder: [], ladderDamage: [],
-      confirm: { r1: [], r5: [] }, confirmDamage: null, short: [], wall: {}, challenge: { val: [], res: [] }, rotors: [], raw: {}, widths: {}, release: {}, stops: [], exportData: null, export2: false
+      confirm: { r1: [], r5: [] }, confirmDamage: null, short: [], challenge: { val: [], res: [] }, rotors: [], raw: {}, widths: {}, release: {}, stops: [], exportData: null, export2: false
     };
     for (var l = 0; l < c.levels; l++) r.ladder.push(new Array(c.ladderParts).fill(null));
     delete r.cfg.gauge;
@@ -805,7 +752,7 @@ if (typeof module !== "undefined") module.exports = QC;
 
   /* ---------- tokens for step text ---------- */
   function tokens(a, c) {
-    var T = { contact: c.contactName, P0: fP(S.run.P0), pprod: fP(a.pprod), pqc: fP(a.pqc), protection: fP(a.protection), ylo: fY(a.ylo), yhi: fY(a.yhi),
+    var T = { sigma: c.processSigma, contact: c.contactName, P0: fP(S.run.P0), pprod: fP(a.pprod), pqc: fP(a.pqc), protection: fP(a.protection), ylo: fY(a.ylo), yhi: fY(a.yhi),
       ladderParts: c.ladderParts, levels: c.levels, confirmParts: c.confirmParts, runParts: c.runParts, rotorChecks: c.rotorChecks, scrapChecks: c.scrapChecks,
       shim: fN(c.shimThickness, 2), gaugeLo: fN(c.gaugeNominal - c.gaugeTol, 3), gaugeHi: fN(c.gaugeNominal + c.gaugeTol, 3), gaugeNom: fN(c.gaugeNominal, 3),
       zeroTol: fN(c.zeroDriftTol, 2), qcMin: fX(a.limits.qcMin), qcMax: fX(a.limits.qcMax), xSeat: fX(a.xSeat), damageParts: c.damageCheckParts,
@@ -841,7 +788,7 @@ if (typeof module !== "undefined") module.exports = QC;
     st.push({ id: "indicator", part: 1, title: "Set up the micrometers", body: ["Switch on the **stack micrometer** (25 to 50 mm) and the **width micrometer** (0 to 25 mm). Set both to **mm**.", "Let them warm up in the room for 15 minutes. Keep the parts in the same room for 15 minutes before measuring.", "Close the micrometers with the **ratchet only**."],
       fields: [{ t: "check", k: "done.indicator", label: "Both micrometers are on, in mm, and warmed up, and the parts are in the room" }],
       gate: function (a, r) { return r.done.indicator ? GO() : WAIT("Tick the box when it is done."); } });
-    st.push({ id: "block", part: 1, title: "Gauge block check", body: ["Set the stack micrometer on its **25 mm standard**.", "Read the **{{gaugeNom}} mm** gauge block and type the reading.", "Repeat this at the start of every shift."],
+    st.push({ id: "block", part: 1, title: "Gauge block check", body: ["Set the stack micrometer on its **25 mm standard**.", "Read the **{{gaugeNom}} mm** gauge block and type the reading."],
       fields: [{ t: "num", k: "gaugeBlock", label: "Gauge block reading", unit: "mm" }],
       gate: function (a, r, c) { if (!num(r.gaugeBlock)) return WAIT("Type the reading."); return Math.abs(r.gaugeBlock - c.gaugeNominal) <= c.gaugeTol + 1e-9 ? GO("Reading is between {{gaugeLo}} and {{gaugeHi}}.") : STOP("The reading is outside {{gaugeLo}} to {{gaugeHi}} mm."); } });
     st.push({ id: "p0", part: 1, title: "Today's pressure", body: ["On the press, open the bearing production program.", "Read the **final-step pressure** and type it here."],
@@ -914,12 +861,9 @@ if (typeof module !== "undefined") module.exports = QC;
       fields: [{ t: "file", k: "exportData", flag: "export2" }],
       out: function (a) { return exportSummary(a) + kv([["Run parts found", a.run.matched + " of " + a.cfg.runParts], ["Short parts found", a.shorts.filter(function (s) { return s.matched; }).length + " of " + a.shorts.length]]); },
       gate: function (a, r, c) { if (!r.export2) return WAIT("Choose the new export file."); if (a.run.matched < c.minRunParts) return STOP("Only " + a.run.matched + " run parts were found in the file."); if (a.shorts.some(function (s) { return !s.matched; })) return STOP("A short part is missing from the file."); return GO(); } });
-    st.push({ id: "wall", part: 5, title: "Read two positions off a curve", body: ["On the press, open the curve of part **R01** (Curve Data).", "Read the position where the curve reaches **{{pqc}} kgf** and where it reaches **{{pprod}} kgf**.", "{{contact}} will show you this step the first time."],
-      fields: [{ t: "num", k: "wall.xqc", label: "Position at {{pqc}} kgf", unit: "mm" }, { t: "num", k: "wall.xprod", label: "Position at {{pprod}} kgf", unit: "mm" }],
-      gate: function (a, r) { if (!num(r.wall.xqc) || !num(r.wall.xprod)) return WAIT("Type both positions."); return a.wallPass ? GO() : STOP("The curve is too flat at the QC pressure."); } });
-    st.push({ id: "limits", part: 5, title: "Your QC min and max", body: ["The app has fitted your measured parts against the press positions."],
+    st.push({ id: "limits", part: 5, title: "Your QC min and max", body: ["The app sets the window from your {{runParts}} run parts: the run average, plus and minus {{sigma}} standard deviations."],
       out: function (a) { return limitsBox(a) + windowNote(a); },
-      gate: function (a) { var bad = a.limits.checks.filter(function (x) { return x.state !== "PASS"; }); if ((a.limits.mode === "physical" || a.limits.mode === "process") && !bad.length) return GO(); if (bad.some(function (x) { return x.state === "WAIT"; })) return WAIT("Waiting for data."); return STOP("Not every check passed: " + bad.map(function (x) { return x.label.toLowerCase(); }).join(", ") + "."); } });
+      gate: function (a) { var bad = a.limits.checks.filter(function (x) { return x.state !== "PASS"; }); if (a.limits.mode === "window" && !bad.length) return GO(); if (bad.some(function (x) { return x.state === "WAIT"; })) return WAIT("Waiting for data."); return STOP("Not every check passed: " + bad.map(function (x) { return x.label.toLowerCase(); }).join(", ") + "."); } });
 
     st.push({ id: "enterqc", part: 6, title: "Type the QC on the press", body: ["In the bearing **production program**, open **Quality inspection, condition 1** and type these values.", "Then turn **Quality inspection enable** ON."],
       out: function (a) { return pressValues(a); },
@@ -964,7 +908,7 @@ if (typeof module !== "undefined") module.exports = QC;
     var lr = a.ladder; if (!num(a.pprod)) return "";
     var raw = num(lr.pprodRaw) ? lr.pprodRaw : null;
     return '<div class="big"><span>Production pressure</span><b>' + fP(a.pprod) + '</b><em>kgf</em></div>' +
-      kv([["Today's pressure", fP(r.P0) + " kgf"], ["Tightest part seated at", fP(lr.pmax) + " kgf"], ["Calculated before rounding", fP(raw) + " kgf"], ["QC pressure", fP(a.pqc) + " kgf"]].concat(num(r.pprodOverride) ? [["Owner override", fP(r.pprodOverride) + " kgf"]] : []));
+      kv([["Today's pressure", fP(r.P0) + " kgf"], ["Tightest part seated at", fP(lr.pmax) + " kgf"], ["Calculated before rounding", fP(raw) + " kgf"]].concat(num(r.pprodOverride) ? [["Owner override", fP(r.pprodOverride) + " kgf"]] : []));
   }
   function exportSummary(a) {
     var r = S.run; if (!r.exportData) return "";
@@ -974,26 +918,11 @@ if (typeof module !== "undefined") module.exports = QC;
     var L = a.limits;
     var h = '<div class="pair"><div class="big"><span>QC min</span><b>' + fX(L.qcMin) + '</b><em>mm</em></div><div class="big"><span>QC max</span><b>' + fX(L.qcMax) + '</b><em>mm</em></div></div>';
     h += '<ul class="checks">' + L.checks.map(function (x) { return '<li><span class="tag ' + (x.state === "PASS" ? "go" : x.state === "WAIT" ? "wait" : "stop") + '">' + x.state + "</span>" + esc(x.label) + "</li>"; }).join("") + "</ul>";
-    h += fitChart(a);
     return h;
   }
-  function fitChart(a) {
-    var pts = a.fit.points; if (!pts || pts.length < 3 || !num(a.fit.b)) return "";
-    var W = 640, H = 260, m = 36;
-    var xs = pts.map(function (p) { return p[0]; }).concat([a.limits.xMin, a.limits.xMax, a.limits.qcMin, a.limits.qcMax].filter(num)), ys = pts.map(function (p) { return p[1]; }).concat([a.ylo, a.yhi]);
-    var x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs), y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
-    var px = function (x) { return m + (x - x0) / ((x1 - x0) || 1) * (W - 2 * m); }, py = function (y) { return H - m - (y - y0) / ((y1 - y0) || 1) * (H - 2 * m); };
-    var s = '<svg class="chart" viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="Measured net spacing S against press position, with the fitted line and the QC window">';
-    if (num(a.limits.qcMin)) s += '<rect x="' + px(a.limits.qcMin) + '" y="' + m / 2 + '" width="' + (px(a.limits.qcMax) - px(a.limits.qcMin)) + '" height="' + (H - 1.5 * m) + '" class="win"/>';
-    [a.ylo, a.yhi].forEach(function (y) { s += '<line x1="' + m + '" x2="' + (W - m) + '" y1="' + py(y) + '" y2="' + py(y) + '" class="lim"/>'; });
-    s += '<line x1="' + px(x0) + '" y1="' + py(a.fit.a + a.fit.b * x0) + '" x2="' + px(x1) + '" y2="' + py(a.fit.a + a.fit.b * x1) + '" class="fitl"/>';
-    pts.forEach(function (p) { s += '<circle cx="' + px(p[0]) + '" cy="' + py(p[1]) + '" r="3.5" class="pt"/>'; });
-    s += '<text x="' + m + '" y="' + (H - 8) + '" class="ax">Press position (mm)</text><text x="' + (m + 4) + '" y="' + (py(a.yhi) - 6) + '" class="ax">Drawing limits ' + fY(a.ylo) + " to " + fY(a.yhi) + " mm</text></svg>";
-    return s + '<p class="note">Dots are your measured parts. The shaded band is the QC window on the press.</p>';
-  }
   function windowNote(a) {
-    if (a.limits.mode === "process") return '<p class="note warn">The drawing window (' + fY(a.ylo) + " to " + fY(a.yhi) + " mm) is too narrow for the press scatter, so the QC window is the process window: run mean ± " + a.cfg.processSigma + " sigma. It catches bearings that did not seat, are cocked, or carry debris. The weekly stack audit stays the physical check. Cpk is not used.</p>";
-    return "";
+    var L = a.limits; if (!num(L.qcMin)) return "";
+    return '<p class="note">The window is the run average ± ' + L.sigma + ' standard deviations.' + (L.capped ? ' The min was raised to halfway between the run average and the closest short part, so that short part is still rejected.' : "") + "</p>";
   }
   function pressValues(a) {
     return '<table class="press"><tbody>' + [["Judgment condition", "Point detection", ""], ["Judgment mode", "Pressure mode", ""], ["Set value", fP(a.pqc), "kgf"], ["Upper limit", fX(a.limits.qcMax), "mm"], ["Lower limit", fX(a.limits.qcMin), "mm"]]
@@ -1176,10 +1105,10 @@ if (typeof module !== "undefined") module.exports = QC;
     ["People", [["contactName", "Who STOP sends people to", "text"]]],
     ["Gauge sign-off", [["requireGaugeSignoff", "Require a gauge sign-off before each run", "bool"], ["gauge.passed", "Gauge check passed", "bool"], ["gauge.date", "Date of the gauge check", "text"], ["gauge.note", "Note", "text"]]],
     ["Ladder", [["ladderParts", "Parts in the ladder", "int"], ["levels", "Pressure levels", "int"], ["level1Frac", "Level 1 as a fraction of today's pressure", "num"], ["level5Factor", "Top level as a multiple of today's pressure", "num"], ["settleTol", "Stopped changing when readings agree within (mm)", "num"], ["minLadderComplete", "Parts that must be complete", "int"], ["lowerStopSteps", "STOP if today is more than this many steps above need", "num"]]],
-    ["Pressures", [["pressureRoundUp", "Round the production pressure up to the nearest (kgf, 0 for none)", "num"], ["qcFactor", "QC pressure as a fraction of production pressure", "num"], ["protectionFactor", "Protection pressure as a multiple of the top level", "num"], ["sigmaP", "Load cell repeatability (kgf)", "num"], ["wallErrLimit", "Largest position error allowed from pressure scatter (mm)", "num"], ["wallCorrection", "Correct positions to the QC pressure", "bool"]]],
+    ["Pressures", [["pressureRoundUp", "Round the production pressure up to the nearest (kgf, 0 for none)", "num"], ["protectionFactor", "Protection pressure as a multiple of the top level", "num"], ]],
     ["Confirm and run", [["confirmParts", "Confirm parts", "int"], ["minConfirmParts", "Confirm parts needed", "int"], ["runParts", "Run parts", "int"], ["minRunParts", "Run parts needed", "int"], ["damageCheckParts", "Parts to inspect for damage", "int"], ["scrapChecks", "Scrap parts for the top level check", "int"]]],
     ["Measurement", [["readingsPerPart", "Stack readings per part", "int"], ["widthReadings", "Width readings per bearing", "int"], ["widthTol", "STOP if a bearing width is further than this from nominal (mm)", "num"], ["rangeLimit", "STOP if one part's stack readings differ by more than (mm, 0 for off)", "num"]]],
-    ["Window", [["guardFactor", "Guard band as a multiple of fit scatter", "num"], ["minGuard", "Smallest guard band (mm)", "num"], ["widthFactor", "Window must be this many times the scatter", "num"], ["processFallback", "Use a process window (mean ± k sigma) if the drawing window is too narrow", "bool"], ["processSigma", "Process window k", "num"], ["cpkTarget", "Cpk target", "num"], ["minFitPoints", "Fit points needed", "int"], ["slopeMin", "Smallest slope size", "num"], ["slopeMax", "Largest slope size", "num"], ["r2Min", "Smallest R squared", "num"]]],
+    ["Window", [["processSigma", "Window size, in standard deviations either side of the run average", "num"], ["cpkTarget", "Cpk target", "num"], ]],
     ["Tests", [["shortOffsets", "Short targets, mm short (comma separated)", "list"], ["shimThickness", "Shim thickness (mm)", "num"], ["programStoppedExpect", "Expected result for program-stopped parts (NG or physical)", "text"], ["gaugeNominal", "Gauge block size (mm)", "num"], ["gaugeTol", "Gauge block tolerance (mm)", "num"]]],
     ["Drawing limits, net spacing S between the shoulders (mm), and bearing width", Object.keys(QC.DEFAULTS.sizes).reduce(function (acc, k) { acc.push(["sizes." + k + ".ylo", k + " lower", "num"]); acc.push(["sizes." + k + ".yhi", k + " upper", "num"]); acc.push(["sizes." + k + ".wNom", k + " bearing width", "num"]); return acc; }, [])],
     ["Press export columns", [["exportColumns.number", "Product number column", "text"], ["exportColumns.contact", "Contact point column", "text"], ["exportColumns.pEnd", "End pressure column", "text"], ["exportColumns.xEnd", "End position column", "text"], ["exportColumns.result", "Result column", "text"]]]
@@ -1217,10 +1146,10 @@ if (typeof module !== "undefined") module.exports = QC;
   function recordHTML(r) {
     var c = cfgFor(r), a = QC.analyse(r, c);
     var rows = [["Run", esc(r.name)], ["Motor size", esc(r.size)], ["Program revision", esc(r.release.rev || "")], ["Specialist", esc(r.release.by || "")], ["Date", new Date(r.updatedAt).toLocaleDateString()], ["Verdict", a.verify.release ? "RELEASE" : "NOT READY"]];
-    var press = [["Final-step pressure (production)", fP(a.pprod) + " kgf"], ["QC window type", a.limits.mode === "process" ? "Process (mean ± " + a.cfg.processSigma + " sigma)" : "Drawing"], ["Protection pressure", fP(a.protection) + " kgf"], ["QC judgment condition", "Point detection"], ["QC judgment mode", "Pressure mode"], ["QC set value", fP(a.pqc) + " kgf"], ["QC upper limit", fX(a.limits.qcMax) + " mm"], ["QC lower limit", fX(a.limits.qcMin) + " mm"]];
-    var stats = [["Fit slope", fN(a.fit.b, 3)], ["Fit scatter", fN(a.fit.sres, 4) + " mm"], ["Guard band", fN(a.limits.guard, 3) + " mm"], ["Run mean", fX(a.run.mean) + " mm"], ["Run scatter", fN(a.run.sd, 4) + " mm"], ["Cpk", fN(a.verify.cpk, 2)]];
+    var press = [["Final-step pressure (production)", fP(a.pprod) + " kgf"], ["QC window type", "Run mean ± " + a.cfg.processSigma + " sigma"], ["Protection pressure", fP(a.protection) + " kgf"], ["QC judgment condition", "Point detection"], ["QC judgment mode", "Pressure mode"], ["QC set value", fP(a.pqc) + " kgf"], ["QC upper limit", fX(a.limits.qcMax) + " mm"], ["QC lower limit", fX(a.limits.qcMin) + " mm"]];
+    var stats = [["Run mean", fX(a.run.mean) + " mm"], ["Run scatter", fN(a.run.sd, 4) + " mm"], ["Cpk", fN(a.verify.cpk, 2)]];
     function t(rs) { return "<table>" + rs.map(function (x) { return "<tr><th>" + x[0] + "</th><td>" + x[1] + "</td></tr>"; }).join("") + "</table>"; }
-    return '<div class="record"><div class="rhead"><img src="' + LOGO + '" alt="Unusual Machines"><div><h1>Bearing press QC release record</h1><p>' + esc(r.size) + " motor, bearing press</p></div></div>" + (a.limits.mode === "process" ? '<p class="rnote">QC window type: process window (run mean ± ' + a.cfg.processSigma + ' sigma). The weekly stack audit is the physical check.</p>' : "") +
+    return '<div class="record"><div class="rhead"><img src="' + LOGO + '" alt="Unusual Machines"><div><h1>Bearing press QC release record</h1><p>' + esc(r.size) + " motor, bearing press</p></div></div>" + 
       "<h2>Run</h2>" + t(rows) + "<h2>Type these on the press</h2>" + t(press) + "<h2>Summary</h2>" + t(stats) + "<h2>Release checks</h2>" +
       "<table>" + a.verify.checklist.map(function (x) { return "<tr><th>" + esc(x.label) + "</th><td>" + (x.pass ? "PASS" : "FAIL") + "</td></tr>"; }).join("") + "</table>" +
       '<div class="sign"><div>Engineer signature and date</div><div>Quality approval and date</div></div></div>';
@@ -1239,7 +1168,7 @@ if (typeof module !== "undefined") module.exports = QC;
     if (a.L) a.L.list.forEach(function (v, i) { add("levels", "L" + (i + 1), "kgf", v); });
     a.ladder.parts.forEach(function (p) { p.readings.forEach(function (v, i) { add("ladder", ID.ladder(p.part, i + 1), "reading_mm", v); }); add("ladder", "P" + QC.pad2(p.part), "seat_kgf", p.seatP); });
     add("result", "", "production_pressure_kgf", a.pprod); add("result", "", "qc_pressure_kgf", a.pqc); add("result", "", "qc_min_mm", a.limits.qcMin); add("result", "", "qc_max_mm", a.limits.qcMax);
-    add("result", "", "fit_slope", a.fit.b); add("result", "", "fit_intercept", a.fit.a); add("result", "", "fit_scatter_mm", a.fit.sres); add("result", "", "cpk", a.verify.cpk); add("result", "", "verdict", a.verify.release ? "RELEASE" : "NOT READY");
+    add("result", "", "cpk", a.verify.cpk); add("result", "", "verdict", a.verify.release ? "RELEASE" : "NOT READY");
     a.confirm.rows.forEach(function (x) { add("confirm", x.id, "reading_mm", x.r1); add("confirm", x.id, "top_level_reading_mm", x.r5); });
     a.shorts.forEach(function (x) { add("short", x.id, "reading_mm", x.y); add("short", x.id, "position_mm", x.x); });
     a.verify.tests.forEach(function (x) { add("test", x.id, "type", x.type); add("test", x.id, "value", x.value); add("test", x.id, "result", x.result); add("test", x.id, "expected", x.expected); });
@@ -1262,7 +1191,7 @@ if (typeof module !== "undefined") module.exports = QC;
   }
   function runSheets(X, wb, r, prefix) {
     var c = cfgFor(r), a = QC.analyse(r, c);
-    var sum = [["Run", r.name], ["Size", r.size], ["Status", r.status], ["Updated", new Date(r.updatedAt).toLocaleString()], ["Today's pressure (kgf)", r.P0], ["Production pressure (kgf)", a.pprod], ["QC pressure (kgf)", a.pqc], ["QC min (mm)", a.limits.qcMin], ["QC max (mm)", a.limits.qcMax], ["Fit slope", a.fit.b], ["Fit scatter (mm)", a.fit.sres], ["Run mean (mm)", a.run.mean], ["Run scatter (mm)", a.run.sd], ["Cpk", a.verify.cpk], ["Verdict", a.verify.release ? "RELEASE" : "NOT READY"]];
+    var sum = [["Run", r.name], ["Size", r.size], ["Status", r.status], ["Updated", new Date(r.updatedAt).toLocaleString()], ["Today's pressure (kgf)", r.P0], ["Production pressure (kgf)", a.pprod], ["QC pressure (kgf)", a.pqc], ["QC min (mm)", a.limits.qcMin], ["QC max (mm)", a.limits.qcMax], ["Run mean (mm)", a.run.mean], ["Run scatter (mm)", a.run.sd], ["Cpk", a.verify.cpk], ["Verdict", a.verify.release ? "RELEASE" : "NOT READY"]];
     X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(sum), (prefix + "Summary").slice(0, 31));
     var lad = [["Part"].concat(a.L ? a.L.list.map(function (v) { return v + " kgf"; }) : []).concat(["Seats at (kgf)"])];
     a.ladder.parts.forEach(function (p) { lad.push([p.part].concat(p.readings).concat([p.seatP])); });
